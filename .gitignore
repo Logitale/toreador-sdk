@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+smoke-test.mjs
+*.log
+
+# mcp/ vit dans son propre repo (Logitale/toreador-mcp-server)
+mcp/

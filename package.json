@@ -1,0 +1,40 @@
+{
+  "name": "@toreador/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for the Toreador crypto QR code API",
+  "license": "MIT",
+  "author": "Toreador <dev@toreador.io>",
+  "homepage": "https://toreador.io/docs",
+  "bugs": {
+    "url": "https://toreador.io/contact",
+    "email": "dev@toreador.io"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Logitale/toreador-sdk.git"
+  },
+  "keywords": ["toreador", "crypto", "qr-code", "sdk", "api", "bitcoin", "ethereum", "solana"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
