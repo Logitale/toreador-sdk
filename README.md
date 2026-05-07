@@ -1,9 +1,35 @@
 # @toreador/sdk
 
+[![npm version](https://img.shields.io/npm/v/@toreador/sdk.svg)](https://www.npmjs.com/package/@toreador/sdk)
+[![npm downloads](https://img.shields.io/npm/dm/@toreador/sdk.svg)](https://www.npmjs.com/package/@toreador/sdk)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg)](https://nodejs.org/)
+
 Official TypeScript SDK for the [Toreador](https://toreador.io) crypto QR code API.
 
-Generate QR codes for native crypto payments (BTC, ETH, SOL, POL) and create
-payment sessions for EVM stablecoins (USDC, USDT, EURC).
+Generate QR codes for native crypto payments (**BTC, ETH, SOL, POL**) and create
+non-custodial payment sessions for EVM stablecoins (**USDC, USDT, EURC**) on
+Ethereum, Polygon, and Base. HMAC-SHA256 signed webhooks for real-time settlement.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+  - [`new Toreador(options)`](#new-toreadoroptions)
+  - [`client.qrcode.generate(params)`](#clientqrcodegenerateparams)
+  - [`client.qrcode.history()`](#clientqrcodehistory)
+  - [`client.sessions.create(params)`](#clientsessionscreateparams)
+  - [`client.sessions.list()`](#clientsessionslist)
+  - [`client.sessions.getStatus(sessionId)`](#clientsessionsgetstatussessionid)
+- [Error Handling](#error-handling)
+- [Supported Tokens & Chains](#supported-tokens--chains)
+- [Requirements](#requirements)
+- [Timeouts and Cancellation](#timeouts-and-cancellation)
+- [Webhook Signature Verification](#webhook-signature-verification)
+- [Links](#links)
+- [License](#license)
 
 ## Installation
 
@@ -154,6 +180,49 @@ const client = new Toreador({
 
 Timeouts and aborted requests both throw a `ToreadorError` with `status: 0`.
 
+## Webhook Signature Verification
+
+When you create a payment session, Toreador sends a signed POST to your webhook
+URL on every status change. The SDK verifies HMAC-SHA256 signatures with a
+constant-time comparison and a 5-minute timestamp tolerance — exactly like
+Stripe's `constructEvent`.
+
+```typescript
+import { Toreador, WebhookSignatureError } from "@toreador/sdk";
+
+// Express example — req.body must be the RAW Buffer, not parsed JSON.
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    const event = await Toreador.webhooks.constructEvent(
+      req.body,                              // raw Buffer | Uint8Array | string
+      req.header("X-Toreador-Signature"),    // hex HMAC-SHA256
+      req.header("X-Toreador-Timestamp"),    // Unix seconds
+      process.env.TOREADOR_WEBHOOK_SECRET    // whsec_...
+    );
+    // event.type === "session.completed", "session.expired", etc.
+    res.sendStatus(200);
+  } catch (err) {
+    if (err instanceof WebhookSignatureError) {
+      return res.sendStatus(400);
+    }
+    throw err;
+  }
+});
+```
+
+Available everywhere WebCrypto is supported: Node.js 18+, Deno, Bun, Cloudflare
+Workers, Vercel Edge, Netlify Edge.
+
+## Links
+
+- 🌐 **Website:** [toreador.io](https://toreador.io)
+- 📖 **API Docs:** [toreador.io/docs](https://toreador.io/docs)
+- 💰 **Pricing:** [toreador.io/pricing](https://toreador.io/pricing)
+- 🔑 **Get an API key:** [toreador.io/dashboard](https://toreador.io/dashboard)
+- 🤖 **MCP Server (for AI agents):** [@toreador/mcp-server](https://www.npmjs.com/package/@toreador/mcp-server)
+- 🐛 **Issues:** [github.com/Logitale/toreador-sdk/issues](https://github.com/Logitale/toreador-sdk/issues)
+- 𝕏 **X / Twitter:** [@Toreador_QR](https://x.com/Toreador_QR)
+
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE)
