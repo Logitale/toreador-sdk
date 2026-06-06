@@ -76,7 +76,11 @@ export interface PaymentRecord {
 
 export interface HistoryResponse {
   success: boolean;
+  data: PaymentRecord[];
+  /** @deprecated alias of `data` (kept for backward compatibility). */
   payments: PaymentRecord[];
+  has_more: boolean;
+  next_cursor: string | null;
 }
 
 export interface SessionRecord {
@@ -97,7 +101,51 @@ export interface SessionRecord {
 
 export interface SessionsListResponse {
   success: boolean;
+  data: SessionRecord[];
+  /** @deprecated alias of `data` (kept for backward compatibility). */
   sessions: SessionRecord[];
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+export interface PaymentTimelineEvent {
+  type: string;
+  at: number;
+  data?: Record<string, unknown>;
+}
+
+/** Unified Payment object — represents a native QR (type=native) OR an ERC-20 session (type=session). */
+export interface UnifiedPayment {
+  success: boolean;
+  id: string;
+  object: "payment";
+  type: "native" | "session";
+  status: string;
+  token: string;
+  chain: string;
+  amount: string;
+  recipient: string;
+  txHash: string | null;
+  confirmations?: number;
+  requiredConfirmations?: number;
+  createdAt: number;
+  expiresAt?: number | null;
+  completedAt?: number | null;
+  timeline: PaymentTimelineEvent[];
+}
+
+/** Pagination options for list endpoints. */
+export interface ListOptions {
+  /** Page size, 1-100 (default 20 server-side). */
+  limit?: number;
+  /** Opaque cursor from a previous page's `next_cursor`. */
+  cursor?: string;
+}
+
+/** Per-request options for mutating calls. */
+export interface RequestOptions {
+  /** Idempotency-Key: retrying with the same key replays the original response (same key + different body → 409). */
+  idempotencyKey?: string;
 }
 
 export interface PaymentStatusResponse {
@@ -164,18 +212,23 @@ export interface ToreadorOptions {
 
 export interface QRCodeNamespace {
   /** Generate a QR code for native tokens or Solana SPL tokens. */
-  generate(params: GenerateQRRequest): Promise<GenerateQRResponse>;
-  /** List your QR code generation history (last 50). */
-  history(): Promise<HistoryResponse>;
+  generate(params: GenerateQRRequest, options?: RequestOptions): Promise<GenerateQRResponse>;
+  /** List your QR code generation history (paginated). */
+  history(options?: ListOptions): Promise<HistoryResponse>;
 }
 
 export interface SessionsNamespace {
   /** Create a payment session for non-native EVM tokens (USDC/USDT/EURC). */
-  create(params: CreateSessionRequest): Promise<CreateSessionResponse>;
-  /** List your payment sessions (last 50). */
-  list(): Promise<SessionsListResponse>;
+  create(params: CreateSessionRequest, options?: RequestOptions): Promise<CreateSessionResponse>;
+  /** List your payment sessions (paginated). */
+  list(options?: ListOptions): Promise<SessionsListResponse>;
   /** Check the status of a specific payment session. */
   getStatus(sessionId: string): Promise<PaymentStatusResponse>;
+}
+
+export interface PaymentsNamespace {
+  /** Retrieve a unified Payment object (native QR or ERC-20 session) by id, with its timeline. */
+  retrieve(id: string): Promise<UnifiedPayment>;
 }
 
 // ---- Main client class ----
@@ -195,9 +248,19 @@ const internals = new WeakMap<Toreador, ClientInternals>();
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+function listQuery(opts?: ListOptions): string {
+  if (!opts) return "";
+  const p = new URLSearchParams();
+  if (opts.limit != null) p.set("limit", String(opts.limit));
+  if (opts.cursor) p.set("cursor", opts.cursor);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 export class Toreador {
   public readonly qrcode: QRCodeNamespace;
   public readonly sessions: SessionsNamespace;
+  public readonly payments: PaymentsNamespace;
 
   constructor(options: ToreadorOptions) {
     if (!options.apiKey) {
@@ -216,18 +279,27 @@ export class Toreador {
     });
 
     this.qrcode = {
-      generate: (params) => this.request<GenerateQRResponse>("POST", "/generate-qr", params),
-      history: () => this.request<HistoryResponse>("GET", "/history"),
+      generate: (params, options) => this.request<GenerateQRResponse>("POST", "/generate-qr", params, options),
+      history: (options) => this.request<HistoryResponse>("GET", `/history${listQuery(options)}`),
     };
 
     this.sessions = {
-      create: (params) => this.request<CreateSessionResponse>("POST", "/create-session", params),
-      list: () => this.request<SessionsListResponse>("GET", "/sessions"),
+      create: (params, options) => this.request<CreateSessionResponse>("POST", "/create-session", params, options),
+      list: (options) => this.request<SessionsListResponse>("GET", `/sessions${listQuery(options)}`),
       getStatus: (id) => this.request<PaymentStatusResponse>("GET", `/payment/${encodeURIComponent(id)}/status`),
+    };
+
+    this.payments = {
+      retrieve: (id) => this.request<UnifiedPayment>("GET", `/payment/${encodeURIComponent(id)}`),
     };
   }
 
-  private async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     const ctx = internals.get(this);
     if (!ctx) {
       throw new Error("Toreador: client internals missing (constructor not run?)");
@@ -239,6 +311,10 @@ export class Toreador {
       "X-API-Key": ctx.apiKey,
       "Accept": "application/json",
     };
+
+    if (options?.idempotencyKey) {
+      headers["Idempotency-Key"] = options.idempotencyKey;
+    }
 
     const init: RequestInit = { method, headers };
 

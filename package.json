@@ -59,7 +59,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "test": "npm run build && node --test",
+    "prepublishOnly": "npm run build && npm test"
   },
   "publishConfig": {
     "access": "public"
