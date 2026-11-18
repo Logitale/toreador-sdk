@@ -1,7 +1,7 @@
 {
   "name": "@toreador/sdk",
-  "version": "0.1.2",
-  "description": "Official TypeScript SDK for the Toreador crypto QR code API. Generate Bitcoin, Ethereum, Solana, Polygon QR codes and create non-custodial USDC / USDT / EURC payment sessions with HMAC-signed webhooks.",
+  "version": "0.2.0",
+  "description": "Official TypeScript SDK for the Toreador API: fiat-denominated crypto checkouts paid in stablecoins (USDC, USDT, EURC) or native crypto, QR codes, payment status, webhooks with HMAC-signed events, accounting export. Non-custodial.",
   "license": "MIT",
   "author": "Toreador <dev@toreador.io> (https://toreador.io)",
   "homepage": "https://toreador.io/docs#sdk",
@@ -17,30 +17,24 @@
   "keywords": [
     "toreador",
     "crypto",
-    "qr-code",
-    "qrcode",
-    "crypto-qr-code",
-    "bitcoin-qr-code",
-    "ethereum-qr-code",
-    "solana-pay",
-    "payment-sessions",
+    "crypto-payments",
     "stablecoin",
     "usdc",
     "usdt",
     "eurc",
+    "checkout",
     "non-custodial",
-    "sdk",
-    "typescript-sdk",
-    "api-client",
-    "bip-21",
-    "eip-681",
-    "webhooks",
-    "hmac",
+    "qr-code",
     "bitcoin",
     "ethereum",
     "solana",
+    "base",
     "polygon",
-    "crypto-payments",
+    "webhooks",
+    "hmac",
+    "sdk",
+    "typescript-sdk",
+    "api-client",
     "web3-payments"
   ],
   "type": "module",
@@ -48,8 +42,8 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "files": [

@@ -6,30 +6,24 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg)](https://nodejs.org/)
 
-Official TypeScript SDK for the [Toreador](https://toreador.io) crypto QR code API.
+Official TypeScript SDK for the [Toreador](https://toreador.io) API.
 
-Generate QR codes for native crypto payments (**BTC, ETH, SOL, POL**) and create
-non-custodial payment sessions for EVM stablecoins (**USDC, USDT, EURC**) on
-Ethereum, Polygon, and Base. HMAC-SHA256 signed webhooks for real-time settlement.
+Accept crypto payments without holding funds: you invoice in **USD or EUR**, the payer
+picks a **stablecoin and a network** (USDC, USDT, EURC and more on Ethereum, Base, Polygon,
+Arbitrum, BNB Chain, Avalanche, Solana) or native crypto, and the payment goes straight to
+the wallet registered on your account. You are notified of the on-chain confirmation through
+**HMAC-signed webhooks** or by polling. Zero dependencies.
 
-## Table of Contents
+## Table of contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-  - [`new Toreador(options)`](#new-toreadoroptions)
-  - [`client.qrcode.generate(params)`](#clientqrcodegenerateparams)
-  - [`client.qrcode.history()`](#clientqrcodehistory)
-  - [`client.sessions.create(params)`](#clientsessionscreateparams)
-  - [`client.sessions.list()`](#clientsessionslist)
-  - [`client.sessions.getStatus(sessionId)`](#clientsessionsgetstatussessionid)
-- [Error Handling](#error-handling)
-- [Supported Tokens & Chains](#supported-tokens--chains)
-- [Requirements](#requirements)
-- [Timeouts and Cancellation](#timeouts-and-cancellation)
-- [Webhook Signature Verification](#webhook-signature-verification)
+- [Quick start](#quick-start)
+- [API reference](#api-reference)
+- [Errors](#errors)
+- [Webhooks](#webhooks)
+- [Test keys and sandbox](#test-keys-and-sandbox)
+- [Timeouts and cancellation](#timeouts-and-cancellation)
 - [Links](#links)
-- [License](#license)
 
 ## Installation
 
@@ -37,192 +31,195 @@ Ethereum, Polygon, and Base. HMAC-SHA256 signed webhooks for real-time settlemen
 npm install @toreador/sdk
 ```
 
-> ⚠️ **Server-side only.** This SDK takes your **secret** API key (`tdr_...`).
-> Never use it in browser code, mobile apps, or any client-side bundle — the
-> key would be visible to every visitor and could be stolen and used against
-> your rate limits / quota. For browser checkouts, redirect the user to the
-> hosted payment URL returned by `sessions.create()` (`session.url`) instead
-> of calling the SDK from the browser.
+> **Server-side only.** The SDK takes your secret API key (`tor_live_…` or `tor_test_…`).
+> Never ship it to a browser or a mobile app. For browser checkouts, redirect the customer
+> to the hosted payment URL returned by `checkouts.create()` (the payer pays wallet-to-wallet).
 
-## Quick Start
+## Quick start
 
 ```typescript
 import Toreador from "@toreador/sdk";
 
-const client = new Toreador({ apiKey: "tdr_your_key_here" });
+const client = new Toreador({ apiKey: process.env.TOREADOR_API_KEY! });
 
-// Generate a Bitcoin QR code
-const qr = await client.qrcode.generate({
-  token: "BTC",
-  chainId: "bitcoin",
-  amount: "0.001",
-  recipientAddress: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-});
+// 1. Pick one of the wallets registered on your account (read-only).
+const { wallets } = await client.account.wallets();
 
-console.log(qr.qrCodeURL); // data:image/png;base64,...
+// 2. Create a checkout for an invoice of 49.90 USD.
+const checkout = await client.checkouts.create(
+  {
+    amount: 49.9,
+    currency: "USD",
+    recipientAddress: wallets[0].address,
+    reference: "order-1042",       // your own id, echoed in webhooks
+    description: "Order #1042",
+  },
+  { idempotencyKey: "order-1042" }, // safe to retry
+);
+
+// 3. Send the customer to the hosted payment page (the payer pays wallet-to-wallet).
+console.log(checkout.url);
+
+// 4. Later: the unified payment object (by checkout id or session id).
+const payment = await client.payments.retrieve(checkout.checkoutId);
+console.log(payment.status, payment.txHash);
 ```
 
-## API Reference
+## API reference
 
 ### `new Toreador(options)`
 
-| Option    | Type       | Required | Description                                                                  |
-|-----------|------------|----------|------------------------------------------------------------------------------|
-| `apiKey`  | `string`   | Yes      | Your API key (`tdr_xxxx`). Get one from your [dashboard](https://toreador.io/dashboard). |
-| `baseURL` | `string`   | No       | API base URL. Defaults to `https://toreador.io/api/v1/public`.               |
-| `fetch`   | `function` | No       | Custom fetch implementation. Defaults to `globalThis.fetch`.                 |
+| Option      | Type       | Required | Description |
+|-------------|------------|----------|-------------|
+| `apiKey`    | `string`   | Yes      | `tor_live_…` or `tor_test_…`, from your dashboard. |
+| `baseURL`   | `string`   | No       | Defaults to `https://toreador.io/api/v1/public`. |
+| `fetch`     | `function` | No       | Custom fetch implementation. |
+| `timeoutMs` | `number`   | No       | Per-request timeout, default 30 000. `0` disables it. |
+| `signal`    | `AbortSignal` | No    | Applied to every request. |
 
-### `client.qrcode.generate(params)`
+### Checkouts
 
-Generate a QR code for native tokens (BTC, ETH, SOL, POL) or Solana SPL tokens.
+| Method | Route | Notes |
+|---|---|---|
+| `client.checkouts.create(params, { idempotencyKey? })` | `POST /checkout` | `amount`, `currency` (USD/EUR), `recipientAddress` (a registered wallet), optional `reference`, `description`, `conversion`, `acceptNative`, `rails`, `source`. Returns `checkoutId`, `url`, `allowedRails`, `expiresAt`. |
 
-```typescript
-const result = await client.qrcode.generate({
-  token: "USDC",
-  chainId: "solana",
-  amount: "250",
-  recipientAddress: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-});
-```
+### Payments
 
-**Returns:** `{ success, type, qrData, qrCodeURL, token, chain, amount, recipientAddress }`
+| Method | Route | Notes |
+|---|---|---|
+| `client.payments.retrieve(id)` | `GET /payment/{id}` | Unified payment object with timeline; `id` is a session id or a checkout id (`co_…`). |
+| `client.payments.export({ from?, to?, format?, establishment_id? })` | `GET /export` | Payments observed as confirmed on-chain, with indicative reference-rate provenance (rate, source, timestamp). JSON by default; `format: "csv"` returns the CSV text. |
+| `client.payments.export({ format: "quickbooks" \| "xero" \| "odoo" \| "pennylane", currency? })` | `GET /export` | The bank-transaction import file of that accounting software, as CSV text: one currency per file, confirmed payments only. You import it yourself; Toreador does not connect to these products. |
 
-### `client.qrcode.history()`
+### Sessions (advanced, token-denominated)
 
-List your last 50 QR code generations.
+| Method | Route |
+|---|---|
+| `client.sessions.create(params, { idempotencyKey? })` | `POST /create-session` |
+| `client.sessions.list({ limit?, cursor?, establishment_id? })` | `GET /sessions` |
+| `client.sessions.getStatus(sessionId)` | `GET /payment/{id}/status` |
 
-```typescript
-const { payments } = await client.qrcode.history();
-```
+### QR codes (native tokens and Solana SPL)
 
-### `client.sessions.create(params)`
+| Method | Route |
+|---|---|
+| `client.qrcode.generate({ token, chainId, amount, recipientAddress, format? })` | `POST /generate-qr` |
+| `client.qrcode.history({ limit?, cursor?, establishment_id? })` | `GET /history` |
 
-Create a payment session for non-native EVM tokens (USDC, USDT, EURC on Ethereum/Polygon/Base).
+### Account, catalogue, compliance
 
-```typescript
-const session = await client.sessions.create({
-  token: "USDC",
-  chainId: "ethereum",
-  amount: "100",
-  recipientAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
-});
+| Method | Route | Notes |
+|---|---|---|
+| `client.ping()` | `GET /ping` | Environment, plan, owner email, API version. |
+| `client.account.get()` | `GET /account` | Plan, subscription truth, quota (`used`, `limit`, `window`), limits. |
+| `client.account.wallets()` | `GET /wallets` | Registered receiving wallets, with `acceptedRails` for exchange wallets and `ownershipProven`. |
+| `client.account.establishments()` | `GET /establishments` | Establishments of the key's organization. Payments carry `establishmentId` and `establishmentName`, whoever on the team created them. |
+| `client.tokens.list()` | `GET /tokens` | Payable (token, chain) pairs for the key's environment, chain metadata and explorer templates. Fetch it instead of hardcoding. |
+| `client.compliance.screen(address)` | `GET /screen` | Sanctions screening (OFAC/EU/UN): `clear`, `sanctioned` or `unknown`. |
 
-console.log(session.url);       // Payment page URL
-console.log(session.expiresIn); // Seconds until expiry
-```
+### Webhooks
 
-### `client.sessions.list()`
+| Method | Route | Notes |
+|---|---|---|
+| `client.webhooks.register({ url, events?, description? })` | `POST /webhooks` | Idempotent by URL. The signing `secret` is returned once: store it encrypted. The endpoint belongs to the environment of the key. |
+| `client.webhooks.list()` | `GET /webhooks` | The endpoints of the key's environment. Never returns secrets. |
+| `client.webhooks.delete(id)` | `DELETE /webhooks/{id}` | |
 
-List your last 50 payment sessions.
+Lists are paginated with a cursor: `{ data, has_more, next_cursor }`.
 
-```typescript
-const { sessions } = await client.sessions.list();
-```
+## Errors
 
-### `client.sessions.getStatus(sessionId)`
-
-Check the status of a payment session.
-
-```typescript
-const status = await client.sessions.getStatus("session_id_here");
-console.log(status.status); // 'pending' | 'submitted' | 'confirming' | 'completed' | 'expired' | 'failed'
-```
-
-## Error Handling
-
-All API errors throw a `ToreadorError` with `status` and `body` properties:
+Every non-2xx response throws a `ToreadorError`:
 
 ```typescript
 import { Toreador, ToreadorError } from "@toreador/sdk";
 
 try {
-  await client.qrcode.generate({ ... });
+  await client.checkouts.create({ amount: 10, currency: "USD", recipientAddress: "0x…" });
 } catch (err) {
   if (err instanceof ToreadorError) {
-    console.error(err.message); // "Missing required fields: ..."
-    console.error(err.status);  // 400
-    console.error(err.body);    // Full error response
+    err.status;          // 402
+    err.code;            // "quota_exceeded"
+    err.type;            // "payment_required"
+    err.message;         // human-readable
+    err.requestId;       // for support
+    err.docUrl;          // link to the error reference
+    if (err.isQuotaExceeded) console.log(err.details.upgrade_url);
+    if (err.isRateLimited) { /* retry after a short delay */ }
+    if (err.isUnauthorized) { /* key revoked: reconnect */ }
   }
 }
 ```
 
-## Supported Tokens & Chains
+Stable codes you will meet: `invalid_amount`, `unsupported_currency`, `address_not_registered`
+(the address is not a wallet of your account), `wallet_provider_unavailable`, `no_rail`,
+`quota_exceeded` (402), `rate_limited` (429), `idempotency_conflict` (409). Timeouts and aborts
+throw a `ToreadorError` with `status: 0`.
 
-| Token | Chains                          | Method             |
-|-------|---------------------------------|--------------------|
-| BTC   | bitcoin                         | `qrcode.generate`  |
-| ETH   | ethereum, polygon, base         | `qrcode.generate`  |
-| SOL   | solana                          | `qrcode.generate`  |
-| POL   | polygon                         | `qrcode.generate`  |
-| USDC  | ethereum, polygon, base, solana | `sessions.create` or `qrcode.generate` (Solana) |
-| USDT  | ethereum, polygon, base         | `sessions.create`  |
-| EURC  | ethereum, base                  | `sessions.create`  |
+## Webhooks
 
-## Requirements
-
-- Node.js 18+ (uses native `fetch`)
-- Deno (works out of the box)
-- Pro plan API key from [toreador.io](https://toreador.io)
-
-**Not for browser use** — see the warning at the top of this file.
-
-## Timeouts and cancellation
-
-Every request has a 30-second default timeout. Override or cancel via:
+Toreador signs every delivery with `Toreador-Signature: t=<unix>,v1=<hmac-sha256-hex>` over
+`"<t>.<raw body>"`. Verify with a constant-time comparison and a 5-minute tolerance:
 
 ```typescript
-const client = new Toreador({
-  apiKey: "tdr_your_key_here",
-  timeoutMs: 10_000,           // optional, ms; set to 0 to disable
-  signal: someAbortController.signal, // optional, applies to every request
-});
-```
+import { Toreador, WebhookSignatureError, type SessionEventData } from "@toreador/sdk";
 
-Timeouts and aborted requests both throw a `ToreadorError` with `status: 0`.
-
-## Webhook Signature Verification
-
-When you create a payment session, Toreador sends a signed POST to your webhook
-URL on every status change. The SDK verifies HMAC-SHA256 signatures with a
-constant-time comparison and a 5-minute timestamp tolerance — exactly like
-Stripe's `constructEvent`.
-
-```typescript
-import { Toreador, WebhookSignatureError } from "@toreador/sdk";
-
-// Express example — req.body must be the RAW Buffer, not parsed JSON.
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   try {
-    const event = await Toreador.webhooks.constructEvent(
-      req.body,                              // raw Buffer | Uint8Array | string
-      req.header("X-Toreador-Signature"),    // hex HMAC-SHA256
-      req.header("X-Toreador-Timestamp"),    // Unix seconds
-      process.env.TOREADOR_WEBHOOK_SECRET    // whsec_...
+    const event = await Toreador.webhooks.constructEvent<SessionEventData>(
+      req.body.toString("utf8"),             // the RAW body
+      req.header("Toreador-Signature"),
+      process.env.TOREADOR_WEBHOOK_SECRET!,  // whsec_…
     );
-    // event.type === "session.completed", "session.expired", etc.
-    res.sendStatus(200);
-  } catch (err) {
-    if (err instanceof WebhookSignatureError) {
-      return res.sendStatus(400);
+    if (event.type === "session.completed" && !event.test) {
+      // event.data.reference is your order id; event.data.checkoutId, txHash, amountUsd…
     }
+    res.sendStatus(200);                     // 2xx acknowledges; otherwise Toreador retries
+  } catch (err) {
+    if (err instanceof WebhookSignatureError) return res.sendStatus(400);
     throw err;
   }
 });
 ```
 
-Available everywhere WebCrypto is supported: Node.js 18+, Deno, Bun, Cloudflare
-Workers, Vercel Edge, Netlify Edge.
+Events: `session.created`, `session.submitted`, `session.confirming`, `session.completed`,
+`session.expired`, `session.failed`, `checkout.created`. Deduplicate on `event.id`: a delivery
+may be retried.
+
+Every event carries `test`: `true` for the test environment (test key, testnet payment). Never
+fulfil a real order on a test event. `data` is typed by `SessionEventData` for the `session.*`
+events and by `CheckoutCreatedEventData` for `checkout.created`.
+
+An endpoint registered with a test key only receives test events, and a test key only lists,
+replaces or deletes test endpoints; the same holds for a live key and live events.
+
+## Test keys and sandbox
+
+A `tor_test_…` key creates sandbox checkouts and sessions on testnets (Base Sepolia, Ethereum
+Sepolia, Polygon Amoy…) outside your quota, with testnet explorer links in `tokens.list()`.
+Use it for your integration tests; switch to `tor_live_…` for production.
+
+The two environments are separate: a live key only reads live payments, a test key only reads test
+payments (lists, export, and reading a payment by id).
+
+## Timeouts and cancellation
+
+```typescript
+const client = new Toreador({
+  apiKey: process.env.TOREADOR_API_KEY!,
+  timeoutMs: 10_000,
+  signal: controller.signal,
+});
+```
+
+Runs wherever `fetch` and WebCrypto exist: Node.js 18+, Deno, Bun, Cloudflare Workers, Vercel Edge.
 
 ## Links
 
-- 🌐 **Website:** [toreador.io](https://toreador.io)
-- 📖 **API Docs:** [toreador.io/docs](https://toreador.io/docs)
-- 💰 **Pricing:** [toreador.io/pricing](https://toreador.io/pricing)
-- 🔑 **Get an API key:** [toreador.io/dashboard](https://toreador.io/dashboard)
-- 🤖 **MCP Server (for AI agents):** [@toreador/mcp-server](https://www.npmjs.com/package/@toreador/mcp-server)
-- 🐛 **Issues:** [github.com/Logitale/toreador-sdk/issues](https://github.com/Logitale/toreador-sdk/issues)
-- 𝕏 **X / Twitter:** [@Toreador_QR](https://x.com/Toreador_QR)
+- Website: [toreador.io](https://toreador.io)
+- API reference: [toreador.io/api-reference](https://toreador.io/api-reference)
+- Pricing: [toreador.io/pricing](https://toreador.io/pricing)
 
 ## License
 
-MIT — see [LICENSE](./LICENSE)
+MIT
